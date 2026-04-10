@@ -1,5 +1,5 @@
 from .core import API
-from exceptions import APIError
+from .exceptions import APIError
 
 __title__ = "PyPENS"
 __authors__ = "Senophyx"
