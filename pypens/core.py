@@ -16,17 +16,17 @@ class UserLogAdapter(logging.LoggerAdapter):
 
 class API(AuthHandler, EtholHandler, MisHandler):
     def __init__(self, email: str, password: str, users_dir: str = 'users', debug: bool = True):
-        self.email = email
-        self.password = password
-        self.token = None
-        self.tahun = None
-        self.semester = None
-        self.tahun_ajaran = None
-        self.users_dir = users_dir
-        os.makedirs(self.users_dir, exist_ok=True)
-        self.username = self.email.split('@')[0]
-        self.session_file = os.path.join(self.users_dir, f"{self.username}.json")
-        self.user_hash = hashlib.sha256(f'{self.email}:{self.password}'.encode()).hexdigest()
+        self._email = email
+        self._password = password
+        self._token = None
+        self._tahun = None
+        self._semester = None
+        self._tahun_ajaran = None
+        self._users_dir = users_dir
+        os.makedirs(self._users_dir, exist_ok=True)
+        self._username = self._email.split('@')[0]
+        self._session_file = os.path.join(self._users_dir, f"{self._username}.json")
+        self._user_hash = hashlib.sha256(f'{self._email}:{self._password}'.encode()).hexdigest()
 
         log_level = logging.DEBUG if debug else logging.INFO
         logging.basicConfig(
@@ -36,10 +36,10 @@ class API(AuthHandler, EtholHandler, MisHandler):
         )
         _baseLog.setLevel(log_level)
         logging.getLogger("urllib3").setLevel(logging.WARNING)
-        self.log = UserLogAdapter(_baseLog, {'username': self.username})
+        self._log = UserLogAdapter(_baseLog, {'username': self._username})
 
-        self.session = requests.Session()
-        self.session.headers.update({
+        self._session = requests.Session()
+        self._session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Linux; Android 11; SM-A528B Build/RP1A.200720.012; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/87.0.4280.141 Mobile Safari/537.36',
             'Accept-Language': 'en-US,en;q=0.9',
             'Connection': 'keep-alive'
@@ -49,14 +49,14 @@ class API(AuthHandler, EtholHandler, MisHandler):
         """Global Session Request with error handling"""
         kwargs.setdefault('timeout', 10)
         try:
-            response = self.session.request(method, url, **kwargs)
+            response = self._session.request(method, url, **kwargs)
             return response
         except requests.exceptions.Timeout:
-            self.log.error(f'Server Timeout : {url}')
+            self._log.error(f'Server Timeout : {url}')
             raise APIError('Server Timeout')
         except requests.exceptions.SSLError:
-            self.log.error(f'Max retries exceeded at {url}')
+            self._log.error(f'Max retries exceeded at {url}')
             raise APIError('Max retries exceeded')
         except requests.exceptions.RequestException as req_exc:
-            self.log.error(f'Error : {req_exc}')
+            self._log.error(f'Error : {req_exc}')
             raise APIError('Internal Error')
