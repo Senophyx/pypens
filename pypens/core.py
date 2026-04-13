@@ -15,7 +15,7 @@ class UserLogAdapter(logging.LoggerAdapter):
     
 
 class API(AuthHandler, EtholHandler, MisHandler):
-    def __init__(self, email: str, password: str, users_dir: str = 'users', debug: bool = True):
+    def __init__(self, email: str, password: str, users_dir: str = 'users', debug: bool = False):
         self._email = email
         self._password = password
         self._token = None
