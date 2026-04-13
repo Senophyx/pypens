@@ -9,7 +9,7 @@ from .exceptions import APIError
 
 
 _baseLog = logging.getLogger("pypens")
-class UserLogAdapter(logging.LoggerAdapter):
+class _UserLogAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         return f"{self.extra['username']} :: {msg}", kwargs
     
@@ -36,7 +36,7 @@ class API(AuthHandler, EtholHandler, MisHandler):
         )
         _baseLog.setLevel(log_level)
         logging.getLogger("urllib3").setLevel(logging.WARNING)
-        self._log = UserLogAdapter(_baseLog, {'username': self._username})
+        self._log = _UserLogAdapter(_baseLog, {'username': self._username})
 
         self._session = requests.Session()
         self._session.headers.update({
