@@ -6,6 +6,7 @@ from .exceptions import APIError
 
 class MisHandler:
     def get_presensi(self):
+        """Return presensi for all matkul"""
         if not self.tahun or not self.semester:
             self.get_config()
 
