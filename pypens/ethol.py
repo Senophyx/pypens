@@ -1,7 +1,6 @@
 import json
 import base64
 from concurrent import futures
-from datetime import datetime, timezone
 from .exceptions import APIError
 
 class EtholHandler:
@@ -21,12 +20,12 @@ class EtholHandler:
                 "nomor": p_data.get("nomor"),
                 "nama": p_data.get("nama"),
                 "nrp": p_data.get("nipnrp"),
+                "hak_akses": p_data.get("hakAkses"),
                 "semester": self._semester,
                 "tahun_aktif": self._tahun,
                 "tahun_ajaran": self._tahun_ajaran
             }
         raise APIError(f'Ethol server Error ({res_profile.status_code})')
-
 
     def get_jadwal(self):
         """Return jadwal kuliah"""
@@ -50,7 +49,7 @@ class EtholHandler:
         if res_waktu.status_code != 200:
             raise APIError(f'Server Error ({res_waktu.status_code})')
         
-        data_waktu = res_waktu.json() if res_waktu.status_code == 200 else []
+        data_waktu = res_waktu.json()
         waktu_dict = { item['kuliah']: item for item in data_waktu }
         jadwal_akhir = []
 
@@ -63,8 +62,11 @@ class EtholHandler:
             jadwal_akhir.append({
                 'id': mk.get('nomor'),
                 'matkul': mk.get("matakuliah", {}).get("nama"),
+                'kelas': mk.get('kode_kelas'),
+                'pararel': mk.get('pararel'),
                 'room': waktu.get('ruang'),
                 'dosen': dosen_name,
+                'nomor_dosen': mk.get('nomor_dosen'),
                 'day': waktu.get('hari'),
                 'start': waktu.get('jam_awal'),
                 'end': waktu.get('jam_akhir')
@@ -72,13 +74,13 @@ class EtholHandler:
         self._log.debug(f'{len(jadwal_akhir)} jadwal fetched')
         return jadwal_akhir
 
-
     def _fetch_tugas(self, mk):
         matkul_id = mk.get('nomor')
         matkul_name = mk.get('matakuliah', {}).get('nama')
+        jenis_schema = mk.get('jenisSchema')
 
         self._log.debug(f'Fetching tugas for {matkul_name}')
-        res_tugas = self._request('GET', f"https://ethol.pens.ac.id/api/tugas?kuliah={matkul_id}&jenisSchema=4")
+        res_tugas = self._request('GET', f"https://ethol.pens.ac.id/api/tugas?kuliah={matkul_id}&jenisSchema={jenis_schema}")
         if res_tugas.status_code != 200:
             self._log.error(f'Unable to fetch tugas for {matkul_name} ({res_tugas.status_code})')
             return []
@@ -97,7 +99,6 @@ class EtholHandler:
             })
         
         return hasil
-
 
     def get_tugas(self):
         """Return all tugas"""
@@ -121,9 +122,30 @@ class EtholHandler:
         self._log.debug(f'Successfully fetching {len(all_tugas)} tugas.')
         return all_tugas
 
+    def get_tugas_terbaru(self):
+        """Return tugas terbaru per matkul via single batch call"""
+        if not self._token: raise APIError('Invalid session token')
+        if not self._tahun or not self._semester:
+            self.get_config()
+
+        self._log.debug('Fetching all matkul')
+        res_matkul = self._request('GET', f'https://ethol.pens.ac.id/api/kuliah?tahun={self._tahun}&semester={self._semester}')
+        if res_matkul.status_code != 200:
+            raise APIError(f'Server Error ({res_matkul.status_code})')
+        data_matkul = res_matkul.json()
+
+        self._log.debug('Fetching tugas terakhir')
+        payload = {'kuliahs': [{'nomor': mk['nomor']} for mk in data_matkul]}
+        res_tugas = self._request('POST', 'https://ethol.pens.ac.id/api/tugas/tugas-terakhir-mahasiswa', json=payload)
+        if res_tugas.status_code != 200:
+            raise APIError(f'Server Error ({res_tugas.status_code})')
+
+        hasil = [tugas for tugas in res_tugas.json() if tugas is not None]
+        self._log.debug(f'Successfully fetching {len(hasil)} tugas terakhir.')
+        return hasil
 
     def get_notification(self):
-        """Fetch tugas and absen notification"""
+        """Fetch all notifications"""
         if not self._token: raise APIError('Invalid session token')
         
         self._log.debug('Fetching notifications')
@@ -136,29 +158,51 @@ class EtholHandler:
         all_notifs = []
         
         for notif in raw_notifs:
-            kode = notif.get('kodeNotifikasi')
-            if kode in ['PRESENSI-KULIAH', 'TUGAS-BARU']:
-                notif_type = 'PRESENSI' if kode == 'PRESENSI-KULIAH' else 'TUGAS'
-                is_read = True if str(notif.get('status')) == '2' else False
-
-                all_notifs.append({
-                    'id': notif.get('idNotifikasi'),
-                    'keterangan': notif.get('keterangan'),
-                    'is_read': is_read,
-                    'notif_type': notif_type,
-                    'related_data': notif.get('dataTerkait'),
-                    'created_at': notif.get('createdAt'),
-                    'time_since': notif.get('waktuNotifikasi'),
-                    'created_at_format': notif.get('createdAtIndonesia')
-                })
+            kode = notif.get('kodeNotifikasi') or ''
+            all_notifs.append({
+                'id': notif.get('idNotifikasi'),
+                'keterangan': notif.get('keterangan'),
+                'is_read': True if str(notif.get('status')) == '2' else False,
+                'notif_type': kode.split('-')[0] if '-' in kode else kode,
+                'related_data': notif.get('dataTerkait'),
+                'url_web': notif.get('urlWeb'),
+                'created_at': notif.get('createdAt'),
+                'time_since': notif.get('waktuNotifikasi'),
+                'created_at_format': notif.get('createdAtIndonesia')
+            })
         
         self._log.debug(f'Fetched {len(all_notifs)} notifications')
         return all_notifs
 
+    def get_jumlah_notif_belum_baca(self):
+        """Return jumlah notifikasi belum dibaca"""
+        if not self._token: raise APIError('Invalid session token')
+
+        self._log.debug('Fetching unread notification count')
+        res_notifs = self._request('GET', 'https://ethol.pens.ac.id/api/notifikasi/mahasiswa-belum-baca')
+        if res_notifs.status_code != 200:
+            raise APIError(f'Server Error ({res_notifs.status_code})')
+
+        jumlah = res_notifs.json().get('jumlah', 0)
+        self._log.debug(f'{jumlah} notifications unread')
+        return jumlah
+
+    def baca_notifikasi(self, id_notifikasi: str):
+        """Mark a notification as read"""
+        if not self._token: raise APIError('Invalid session token')
+
+        self._log.debug(f'Marking notification {id_notifikasi} as read')
+        res_baca = self._request('PUT', 'https://ethol.pens.ac.id/api/notifikasi/mahasiswa-baca-notif',
+                                 json={'idNotifikasi': id_notifikasi})
+        if res_baca.status_code != 200:
+            raise APIError(f'Server Error ({res_baca.status_code})')
+        return True
 
     def absen(self):
-        """check open absences and take attendance"""
+        """Check open attendance sessions and take attendance"""
         if not self._token: raise APIError('Invalid session token')
+        if not self._tahun or not self._semester:
+            self.get_config()
 
         try:
             token_b64 = self._token.split('.')[1]
@@ -168,84 +212,68 @@ class EtholHandler:
         except Exception as e:
             self._log.error(f'Unable to extract mahasiswa_id : {e}')
             raise APIError('Unable to extract mahasiswa_id')
-        
-        notifs = self.get_notification()
-        if not notifs:
-            self._log.error('unable to fetch notif')
-            return {
-                'matkul': None,
-                'submitted': False,
-                'details': 'no attendance today'
-            }
 
-        today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-        presensi_notifs = [
-            n for n in notifs 
-            if n['notif_type'] == 'PRESENSI' and n['created_at'].startswith(today_str)
-        ]
-        if not presensi_notifs:
-            self._log.debug('no attendance today')
-            return {
-                'matkul': None,
-                'submitted': False,
-                'details': 'no attendance today'
-            }
+        self._log.debug('Fetching all matkul')
+        res_matkul = self._request('GET', f'https://ethol.pens.ac.id/api/kuliah?tahun={self._tahun}&semester={self._semester}')
+        if res_matkul.status_code != 200:
+            raise APIError(f'Server Error ({res_matkul.status_code})')
+        data_matkul = res_matkul.json()
 
-        for notif in presensi_notifs:
-            notif_text = notif.get('keterangan', '')
-            matkul_name = notif_text.split('matakuliah ')[-1].strip() if 'matakuliah ' in notif_text else None
+        def _cek_absen(mk):
+            """Return [(mk, sesi)] for open sessions on this matkul"""
+            buka = []
+            res_aktif = self._request('GET', 'https://ethol.pens.ac.id/api/presensi/aktif-kuliah',
+                                      params={'kuliah': mk['nomor'], 'jenis_schema': mk['jenisSchema']})
+            if res_aktif.status_code == 200:
+                for sesi in res_aktif.json() or []:
+                    if sesi.get('open') in (1, '1', True):
+                        buka.append((mk, sesi))
+            return buka
 
-            related_data = notif.get('related_data', '')
-            if '-' not in related_data:
+        open_list = []
+        self._log.debug('Checking open attendance sessions')
+        with futures.ThreadPoolExecutor(max_workers=10) as exec:
+            for buka in exec.map(_cek_absen, data_matkul):
+                open_list.extend(buka)
+
+        if not open_list:
+            self._log.debug('No open attendance')
+            return {'absen': [], 'details': 'no open attendance'}
+
+        hasil = []
+        for mk, sesi in open_list:
+            matkul_name = mk.get('matakuliah', {}).get('nama')
+            sesi_key = sesi.get('key')
+
+            res_riwayat = self._request('GET', 'https://ethol.pens.ac.id/api/presensi/riwayat',
+                                        params={'kuliah': mk['nomor'], 'jenis_schema': mk['jenisSchema'], 'nomor': mahasiswa_id})
+            riwayat = res_riwayat.json() if res_riwayat.status_code == 200 else []
+            if any(r.get('key') == sesi_key for r in riwayat):
+                self._log.debug(f'{matkul_name} already attended')
+                hasil.append({'matkul': matkul_name, 'submitted': False, 'details': 'already attended'})
                 continue
-            kuliah_id, jenis_schema = related_data.split('-')
-            res_kuliah_terakhir = self._request('GET', f'https://ethol.pens.ac.id/api/presensi/terakhir-kuliah?kuliah={kuliah_id}&jenis_schema={jenis_schema}')
 
-            if res_kuliah_terakhir.status_code == 200:
-                data_kuliah_terakhir = res_kuliah_terakhir.json()
-
-                if data_kuliah_terakhir.get('ditemukan') and data_kuliah_terakhir.get('open'):
-                    absen_key = data_kuliah_terakhir.get('key')
-                    payload = {
-                        'kuliah': int(kuliah_id), 'mahasiswa': int(mahasiswa_id),
-                        'jenis_schema': int(jenis_schema), 'kuliah_asal': int(kuliah_id), 'key': absen_key
-                    }
-                    res_submit = self._request('POST', 'https://ethol.pens.ac.id/api/presensi/mahasiswa', json=payload)
-                    if res_submit.status_code == 200:
-                        json_submit = res_submit.json()
-                        if json_submit.get('sukses'):
-                            self._log.debug(f'Successfully presence for {matkul_name}')
-                            return {
-                                'matkul': matkul_name,
-                                'submitted': True,
-                                "details": "successfully attended"
-                            }
-                        elif json_submit.get('pesan') == "Anda sudah melakukan di sesi kuliah ini":
-                            self._log.debug(f'{matkul_name} already attended')
-                            continue
-                        else:
-                            pesan_error = json_submit.get('pesan', 'server error during submission')
-                            self._log.error(f'Failed to submit presence for {matkul_name}: {pesan_error}')
-                            return {
-                                "matkul": matkul_name,
-                                "submitted": False,
-                                "details": pesan_error
-                            }
-                    else:
-                        self._log.error(f'Failed to submit presence for {matkul_name}')
-                        return {
-                            "matkul": matkul_name,
-                            "submitted": False,
-                            "details": "server error during submission"
-                        }
+            payload = {
+                'kuliah': int(mk['nomor']),
+                'jenis_schema': int(mk['jenisSchema']),
+                'mahasiswa': int(mahasiswa_id),
+                'key': sesi_key,
+                'kuliah_asal': mk.get('kuliah_asal')
+            }
+            res_submit = self._request('POST', 'https://ethol.pens.ac.id/api/presensi/mahasiswa', json=payload)
+            if res_submit.status_code == 200:
+                json_submit = res_submit.json()
+                if json_submit.get('sukses'):
+                    self._log.debug(f'Successfully presence for {matkul_name}')
+                    hasil.append({'matkul': matkul_name, 'submitted': True, 'details': 'successfully attended'})
                 else:
-                    self._log.debug(f'Attendance closed for {matkul_name}')
+                    pesan_error = json_submit.get('pesan', 'server error during submission')
+                    self._log.error(f'Failed to submit presence for {matkul_name}: {pesan_error}')
+                    hasil.append({'matkul': matkul_name, 'submitted': False, 'details': pesan_error})
             else:
-                raise APIError(f'Server Error ({res_kuliah_terakhir.status_code})')
-        
-        self._log.debug('All attendance is already attended or closed')
-        return {
-            'matkul': None,
-            'submitted': False,
-            "details": "All attendance is already attended or closed"
-        }
+                self._log.error(f'Failed to submit presence for {matkul_name} ({res_submit.status_code})')
+                hasil.append({'matkul': matkul_name, 'submitted': False,
+                              'details': f'server error during submission ({res_submit.status_code})'})
+
+        self._log.debug(f'Attendance processed for {len(hasil)} matkul')
+        return {'absen': hasil, 'details': f'{len(hasil)} matkul diproses'}

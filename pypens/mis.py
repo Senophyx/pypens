@@ -102,7 +102,9 @@ class MisHandler:
                         week_data.append(status)
 
                     presensi_data.append({
+                        "kode": cols[0].get_text(strip=True),
                         "matkul": matkul_name,
+                        "persentase": cols[18].get_text(strip=True) if len(cols) >= 19 else None,
                         "week": week_data
                     })
 

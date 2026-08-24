@@ -22,6 +22,7 @@ class API(AuthHandler, EtholHandler, MisHandler):
         self._tahun = None
         self._semester = None
         self._tahun_ajaran = None
+        self._menit_per_jam = None
         self._users_dir = users_dir
         os.makedirs(self._users_dir, exist_ok=True)
         self._username = self._email.split('@')[0]
@@ -46,17 +47,21 @@ class API(AuthHandler, EtholHandler, MisHandler):
         })
 
     def _request(self, method: str, url: str, **kwargs):
-        """Global Session Request with error handling"""
+        """Global Session Request with error handling and one-shot refresh on 401"""
         kwargs.setdefault('timeout', 10)
         try:
             response = self._session.request(method, url, **kwargs)
+            if response.status_code == 401 and '/api/auth/' not in url:
+                self._log.debug('Token expired, refreshing session')
+                if self._refresh():
+                    response = self._session.request(method, url, **kwargs)
             return response
         except requests.exceptions.Timeout:
             self._log.error(f'Server Timeout : {url}')
             raise APIError('Server Timeout')
         except requests.exceptions.SSLError:
-            self._log.error(f'Max retries exceeded at {url}')
-            raise APIError('Max retries exceeded')
+            self._log.error(f'SSL Error at {url}')
+            raise APIError('SSL Error')
         except requests.exceptions.RequestException as req_exc:
             self._log.error(f'Error : {req_exc}')
             raise APIError('Internal Error')
