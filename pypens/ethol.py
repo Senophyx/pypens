@@ -122,8 +122,8 @@ class EtholHandler:
         self._log.debug(f'Successfully fetching {len(all_tugas)} tugas.')
         return all_tugas
 
-    def get_tugas_terbaru(self):
-        """Return tugas terbaru per matkul via single batch call"""
+    def get_newest_tugas(self):
+        """Return the newest tugas per matkul via a single batch call"""
         if not self._token: raise APIError('Invalid session token')
         if not self._tahun or not self._semester:
             self.get_config()
@@ -174,8 +174,8 @@ class EtholHandler:
         self._log.debug(f'Fetched {len(all_notifs)} notifications')
         return all_notifs
 
-    def get_jumlah_notif_belum_baca(self):
-        """Return jumlah notifikasi belum dibaca"""
+    def get_unread_notification_count(self):
+        """Return the number of unread notifications"""
         if not self._token: raise APIError('Invalid session token')
 
         self._log.debug('Fetching unread notification count')
