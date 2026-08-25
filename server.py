@@ -89,9 +89,9 @@ def api_tugas(papi: API = Depends(GetAuth)):
     tugas = papi.get_tugas()
     return {'error': False, 'data': tugas}
 
-@app.post("/api/get-tugas-terbaru")
+@app.post("/api/get-latest-tugas")
 def api_tugas_terbaru(papi: API = Depends(GetAuth)):
-    tugas = papi.get_newest_tugas()
+    tugas = papi.get_latest_tugas()
     return {'error': False, 'data': tugas}
 
 @app.post("/api/get-notif")

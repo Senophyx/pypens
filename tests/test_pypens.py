@@ -102,9 +102,9 @@ class TestPypens(unittest.TestCase):
         _dump('get_tugas()', tugas)
         self.assertIsInstance(tugas, list)
 
-    def test_get_newest_tugas(self):
-        tugas = self.api.get_newest_tugas()
-        _dump('get_newest_tugas()', tugas)
+    def test_get_latest_tugas(self):
+        tugas = self.api.get_latest_tugas()
+        _dump('get_latest_tugas()', tugas)
         self.assertIsInstance(tugas, list)
 
     def test_get_notification(self):

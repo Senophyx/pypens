@@ -122,8 +122,8 @@ class EtholHandler:
         self._log.debug(f'Successfully fetching {len(all_tugas)} tugas.')
         return all_tugas
 
-    def get_newest_tugas(self):
-        """Return the newest tugas per matkul via a single batch call"""
+    def get_latest_tugas(self):
+        """Return the latest tugas per matkul via a single batch call"""
         if not self._token: raise APIError('Invalid session token')
         if not self._tahun or not self._semester:
             self.get_config()
