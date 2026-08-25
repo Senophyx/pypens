@@ -45,3 +45,6 @@ venv.bak/
 *__test*
 tests/test.env
 tests/users/
+
+# Session cache
+users/
