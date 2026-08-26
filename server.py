@@ -1,4 +1,6 @@
 import hashlib
+from collections import defaultdict, deque
+from time import time
 
 from pypens import API, APIError
 import uvicorn
@@ -64,6 +66,25 @@ class UserCreds(BaseModel):
     email: str = Field(..., description='PENS NetID email, e.g. `test@it.student.pens.ac.id`',
                        examples=['test@it.student.pens.ac.id'])
     password: str = Field(..., description='PENS NetID password', examples=['your-password'])
+
+# ponytail: in-memory rate limit, per-process only; switch to fastapi-limiter+Redis if multi-worker
+_RATE_LIMIT = 20
+_RATE_WINDOW = 60.0
+_hits = defaultdict(deque)
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    if request.url.path.startswith('/api'):
+        fwd = request.headers.get('x-forwarded-for')
+        ip = fwd.split(',')[0].strip() if fwd else (request.client.host if request.client else 'unknown')
+        now = time()
+        window = _hits[ip]
+        while window and window[0] <= now - _RATE_WINDOW:
+            window.popleft()
+        if len(window) >= _RATE_LIMIT:
+            return JSONResponse(status_code=429, content={'error': True, 'msg': 'Rate limit exceeded. Try again later.', 'data': None})
+        window.append(now)
+    return await call_next(request)
 
 # ponytail: global session cache, per-user lock if concurrency matters
 _sessions = {}
