@@ -265,7 +265,18 @@ class EtholHandler:
                 json_submit = res_submit.json()
                 if json_submit.get('sukses'):
                     self._log.debug(f'Successfully presence for {matkul_name}')
-                    hasil.append({'matkul': matkul_name, 'submitted': True, 'details': 'successfully attended'})
+                    verifikasi = {}
+                    res_riwayat2 = self._request('GET', 'https://ethol.pens.ac.id/api/presensi/riwayat',
+                                                 params={'kuliah': mk['nomor'], 'jenis_schema': mk['jenisSchema'], 'nomor': mahasiswa_id})
+                    if res_riwayat2.status_code == 200:
+                        for r in res_riwayat2.json() or []:
+                            if r.get('key') == sesi_key:
+                                verifikasi = {'nomor': r.get('nomor'), 'tanggal': r.get('tanggal'),
+                                              'waktu_indonesia': r.get('waktu_indonesia')}
+                                break
+                    hasil.append({'matkul': matkul_name, 'submitted': True,
+                                  'details': json_submit.get('pesan', 'successfully attended'),
+                                  'verifikasi': verifikasi})
                 else:
                     pesan_error = json_submit.get('pesan', 'server error during submission')
                     self._log.error(f'Failed to submit presence for {matkul_name}: {pesan_error}')
