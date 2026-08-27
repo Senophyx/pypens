@@ -80,9 +80,11 @@ class EtholHandler:
         jenis_schema = mk.get('jenisSchema')
 
         self._log.debug(f'Fetching tugas for {matkul_name}')
-        res_tugas = self._request('GET', f"https://ethol.pens.ac.id/api/tugas?kuliah={matkul_id}&jenisSchema={jenis_schema}")
-        if res_tugas.status_code != 200:
-            self._log.error(f'Unable to fetch tugas for {matkul_name} ({res_tugas.status_code})')
+        res_tugas = self._thread_request('GET', f"https://ethol.pens.ac.id/api/tugas?kuliah={matkul_id}&jenisSchema={jenis_schema}",
+                                         self._clone_session())
+        if res_tugas is None or res_tugas.status_code != 200:
+            self._log.error(f'Unable to fetch tugas for {matkul_name}' +
+                            (f" ({res_tugas.status_code})" if res_tugas is not None else ''))
             return []
         
         data_tugas = res_tugas.json()
@@ -222,9 +224,10 @@ class EtholHandler:
         def _cek_absen(mk):
             """Return [(mk, sesi)] for open sessions on this matkul"""
             buka = []
-            res_aktif = self._request('GET', 'https://ethol.pens.ac.id/api/presensi/aktif-kuliah',
-                                      params={'kuliah': mk['nomor'], 'jenis_schema': mk['jenisSchema']})
-            if res_aktif.status_code == 200:
+            res_aktif = self._thread_request('GET', 'https://ethol.pens.ac.id/api/presensi/aktif-kuliah',
+                                             self._clone_session(),
+                                             params={'kuliah': mk['nomor'], 'jenis_schema': mk['jenisSchema']})
+            if res_aktif is not None and res_aktif.status_code == 200:
                 for sesi in res_aktif.json() or []:
                     if sesi.get('open') in (1, '1', True):
                         buka.append((mk, sesi))

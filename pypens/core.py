@@ -1,6 +1,8 @@
 import os
 import hashlib
 import logging
+import threading
+import time
 import requests
 from .auth import AuthHandler
 from .ethol import EtholHandler
@@ -45,6 +47,37 @@ class API(AuthHandler, EtholHandler, MisHandler):
             'Accept-Language': 'en-US,en;q=0.9',
             'Connection': 'keep-alive'
         })
+        self._refresh_lock = threading.Lock()
+
+    def _clone_session(self):
+        """Create an independent session with copied headers and cookies (thread-safe)"""
+        session = requests.Session()
+        session.headers.update(self._session.headers)
+        session.cookies.update(self._session.cookies)
+        return session
+
+    def _thread_request(self, method: str, url: str, session, **kwargs):
+        """Request via a dedicated session inside a worker thread; retries on network failure,
+        returns None if all attempts fail"""
+        kwargs.setdefault('timeout', 10)
+        attempt = 1
+        # ponytail: 3 attempts with backoff beats reset-heavy servers; tune if still failing
+        while True:
+            try:
+                response = session.request(method, url, **kwargs)
+                if response.status_code == 401 and '/api/auth/' not in url:
+                    with self._refresh_lock:
+                        if self._refresh():
+                            session.cookies.set('token', self._token, domain='ethol.pens.ac.id', path='/')
+                            response = session.request(method, url, **kwargs)
+                return response
+            except requests.exceptions.RequestException as req_exc:
+                if attempt >= 3:
+                    self._log.error(f'Error : {req_exc}')
+                    return None
+                self._log.debug(f'Error (attempt {attempt}): {req_exc}')
+                time.sleep(0.5 * attempt)
+                attempt += 1
 
     def _request(self, method: str, url: str, **kwargs):
         """Global Session Request with error handling and one-shot refresh on 401"""
