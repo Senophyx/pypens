@@ -201,7 +201,12 @@ class EtholHandler:
         return True
 
     def absen(self):
-        """Check open attendance sessions and take attendance"""
+        """Check open attendance sessions and take attendance.
+
+        Uses notification-first shortcut: when there is no PRESENSI-KULIAH
+        notification, it returns in one request (fast idle path). When a
+        notification exists, it only checks the related matkul(s).
+        """
         if not self._token: raise APIError('Invalid session token')
         if not self._tahun or not self._semester:
             self.get_config()
@@ -215,41 +220,65 @@ class EtholHandler:
             self._log.error(f'Unable to extract mahasiswa_id : {e}')
             raise APIError('Unable to extract mahasiswa_id')
 
-        self._log.debug('Fetching all matkul')
-        res_matkul = self._request('GET', f'https://ethol.pens.ac.id/api/kuliah?tahun={self._tahun}&semester={self._semester}')
-        if res_matkul.status_code != 200:
-            raise APIError(f'Server Error ({res_matkul.status_code})')
-        data_matkul = res_matkul.json()
+        self._log.debug('Fetching notifications for attendance shortcut')
+        res_notif = self._request('GET', 'https://ethol.pens.ac.id/api/notifikasi/mahasiswa?filterNotif=SEMUA')
+        if res_notif.status_code != 200:
+            raise APIError(f'Server Error ({res_notif.status_code})')
 
-        def _cek_absen(mk):
-            """Return [(mk, sesi)] for open sessions on this matkul"""
-            buka = []
-            res_aktif = self._thread_request('GET', 'https://ethol.pens.ac.id/api/presensi/aktif-kuliah',
-                                             self._clone_session(),
-                                             params={'kuliah': mk['nomor'], 'jenis_schema': mk['jenisSchema']})
-            if res_aktif is not None and res_aktif.status_code == 200:
-                for sesi in res_aktif.json() or []:
-                    if sesi.get('open') in (1, '1', True):
-                        buka.append((mk, sesi))
-            return buka
+        presensi_notifs = [
+            n for n in res_notif.json()
+            if n.get('kodeNotifikasi') == 'PRESENSI-KULIAH'
+        ]
+        if not presensi_notifs:
+            self._log.debug('No attendance notification')
+            return {'absen': [], 'details': 'no open attendance'}
+
+        def _cek_notif(notif):
+            """Return (kuliah, jenis_schema, key, matkul_name) for an open session"""
+            terkait = notif.get('dataTerkait') or ''
+            if '-' not in terkait:
+                return None
+            kuliah_id, jenis_schema = terkait.split('-', 1)
+
+            res_aktif = self._request('GET', 'https://ethol.pens.ac.id/api/presensi/aktif-kuliah',
+                                      params={'kuliah': kuliah_id, 'jenis_schema': jenis_schema})
+            if res_aktif.status_code != 200:
+                return None
+            for sesi in res_aktif.json() or []:
+                if sesi.get('open') in (1, '1', True):
+                    matkul_name = notif.get('keterangan', '')
+                    if 'matakuliah ' in matkul_name:
+                        matkul_name = matkul_name.split('matakuliah ', 1)[1].strip()
+                    return {'kuliah': int(kuliah_id), 'jenis_schema': int(jenis_schema),
+                            'key': sesi.get('key'), 'matkul': matkul_name, 'kuliah_asal': None}
+            return None
 
         open_list = []
-        self._log.debug('Checking open attendance sessions')
-        with futures.ThreadPoolExecutor(max_workers=10) as exec:
-            for buka in exec.map(_cek_absen, data_matkul):
-                open_list.extend(buka)
+        for notif in presensi_notifs:
+            target = _cek_notif(notif)
+            if target is None:
+                continue
+            res_mk = self._request('GET', 'https://ethol.pens.ac.id/api/kuliah/by-kuliah-js',
+                                   params={'kuliah': target['kuliah'], 'jenisSchema': target['jenis_schema']})
+            if res_mk.status_code == 200:
+                data_mk = res_mk.json()
+                if isinstance(data_mk, list) and data_mk:
+                    mk = data_mk[0]
+                    target['kuliah_asal'] = mk.get('kuliah_asal')
+                    target['matkul'] = mk.get('matakuliah', {}).get('nama') or target['matkul']
+            open_list.append(target)
 
         if not open_list:
-            self._log.debug('No open attendance')
+            self._log.debug('Attendance notification found but no open session')
             return {'absen': [], 'details': 'no open attendance'}
 
         hasil = []
-        for mk, sesi in open_list:
-            matkul_name = mk.get('matakuliah', {}).get('nama')
-            sesi_key = sesi.get('key')
+        for target in open_list:
+            matkul_name = target['matkul']
+            sesi_key = target['key']
 
             res_riwayat = self._request('GET', 'https://ethol.pens.ac.id/api/presensi/riwayat',
-                                        params={'kuliah': mk['nomor'], 'jenis_schema': mk['jenisSchema'], 'nomor': mahasiswa_id})
+                                        params={'kuliah': target['kuliah'], 'jenis_schema': target['jenis_schema'], 'nomor': mahasiswa_id})
             riwayat = res_riwayat.json() if res_riwayat.status_code == 200 else []
             if any(r.get('key') == sesi_key for r in riwayat):
                 self._log.debug(f'{matkul_name} already attended')
@@ -257,11 +286,11 @@ class EtholHandler:
                 continue
 
             payload = {
-                'kuliah': int(mk['nomor']),
-                'jenis_schema': int(mk['jenisSchema']),
+                'kuliah': int(target['kuliah']),
+                'jenis_schema': int(target['jenis_schema']),
                 'mahasiswa': int(mahasiswa_id),
                 'key': sesi_key,
-                'kuliah_asal': mk.get('kuliah_asal')
+                'kuliah_asal': target['kuliah_asal']
             }
             res_submit = self._request('POST', 'https://ethol.pens.ac.id/api/presensi/mahasiswa', json=payload)
             if res_submit.status_code == 200:
@@ -270,7 +299,7 @@ class EtholHandler:
                     self._log.debug(f'Successfully presence for {matkul_name}')
                     verifikasi = {}
                     res_riwayat2 = self._request('GET', 'https://ethol.pens.ac.id/api/presensi/riwayat',
-                                                 params={'kuliah': mk['nomor'], 'jenis_schema': mk['jenisSchema'], 'nomor': mahasiswa_id})
+                                                 params={'kuliah': target['kuliah'], 'jenis_schema': target['jenis_schema'], 'nomor': mahasiswa_id})
                     if res_riwayat2.status_code == 200:
                         for r in res_riwayat2.json() or []:
                             if r.get('key') == sesi_key:
