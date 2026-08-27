@@ -319,4 +319,4 @@ class EtholHandler:
                               'details': f'server error during submission ({res_submit.status_code})'})
 
         self._log.debug(f'Attendance processed for {len(hasil)} matkul')
-        return {'absen': hasil, 'details': f'{len(hasil)} matkul diproses'}
+        return {'absen': hasil, 'details': f'{len(hasil)} matkul attended'}
