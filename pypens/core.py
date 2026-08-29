@@ -61,7 +61,6 @@ class API(AuthHandler, EtholHandler, MisHandler):
         returns None if all attempts fail"""
         kwargs.setdefault('timeout', 10)
         attempt = 1
-        # ponytail: 3 attempts with backoff beats reset-heavy servers; tune if still failing
         while True:
             try:
                 response = session.request(method, url, **kwargs)
@@ -72,7 +71,7 @@ class API(AuthHandler, EtholHandler, MisHandler):
                             response = session.request(method, url, **kwargs)
                 return response
             except requests.exceptions.RequestException as req_exc:
-                if attempt >= 3:
+                if attempt >= 5:
                     self._log.error(f'Error : {req_exc}')
                     return None
                 self._log.debug(f'Error (attempt {attempt}): {req_exc}')

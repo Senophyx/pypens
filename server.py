@@ -1,4 +1,5 @@
 import hashlib
+import threading
 from collections import defaultdict, deque
 from time import time
 
@@ -67,7 +68,6 @@ class UserCreds(BaseModel):
                        examples=['test@it.student.pens.ac.id'])
     password: str = Field(..., description='PENS NetID password', examples=['your-password'])
 
-# ponytail: in-memory rate limit, per-process only; switch to fastapi-limiter+Redis if multi-worker
 _RATE_LIMIT = 20
 _RATE_WINDOW = 60.0
 _hits = defaultdict(deque)
@@ -86,16 +86,20 @@ async def rate_limit(request: Request, call_next):
         window.append(now)
     return await call_next(request)
 
-# ponytail: global session cache, per-user lock if concurrency matters
 _sessions = {}
+_sessions_lock = threading.Lock()
+
 
 def GetAuth(creds: UserCreds, request: Request):
     cache_key = hashlib.sha256(f'{creds.email}:{creds.password}'.encode()).hexdigest()
     papi = _sessions.get(cache_key)
     if papi is None:
-        papi = API(creds.email, creds.password)
-        papi.login()
-        _sessions[cache_key] = papi
+        with _sessions_lock:
+            papi = _sessions.get(cache_key)
+            if papi is None:
+                papi = API(creds.email, creds.password)
+                papi.login()
+                _sessions[cache_key] = papi
     request.state.user = papi._username
     return papi
 
