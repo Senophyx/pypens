@@ -22,6 +22,7 @@ services:
     volumes:
       - ./server.py:/app/server.py
       - ./pypens:/app/pypens
+      - ./users:/app/users
 
     ports:
       - "2003:8000"
