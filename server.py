@@ -258,6 +258,7 @@ def api_presensi(papi: API = Depends(GetAuth)):
           }))
 def api_absen(papi: API = Depends(GetAuth)):
     if not _is_course_hours():
+        log.info(f'[{papi._username}] absen skipped (outside course hours)')
         return {'error': False, 'data': {'absen': [], 'details': 'no open attendance'}}
     data_absen = papi.absen()
     return {'error': False, 'data': data_absen}
