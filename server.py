@@ -63,6 +63,14 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         content={'error': True, 'msg': msg, 'data': None}
     )
 
+@app.exception_handler(Exception)
+async def internal_error_handler(request: Request, exc: Exception):
+    log.exception(f'Unhandled error on {request.method} {request.url.path}')
+    return JSONResponse(
+        status_code=500,
+        content={'error': True, 'msg': 'internal error', 'data': None}
+    )
+
 # =============================
 
 class UserCreds(BaseModel):
