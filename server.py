@@ -1,7 +1,9 @@
 import hashlib
 import threading
 from collections import defaultdict, deque
+from datetime import datetime
 from time import time
+from zoneinfo import ZoneInfo
 
 from pypens import API, APIError
 import uvicorn
@@ -71,6 +73,14 @@ class UserCreds(BaseModel):
 _RATE_LIMIT = 20
 _RATE_WINDOW = 60.0
 _hits = defaultdict(deque)
+
+_COURSE_START = 6
+_COURSE_END = 18
+
+def _is_course_hours() -> bool:
+    """True if now is Mon-Fri between 06:00 and 18:00 (Asia/Jakarta)"""
+    now = datetime.now(ZoneInfo('Asia/Jakarta'))
+    return now.weekday() < 5 and _COURSE_START <= now.hour < _COURSE_END
 
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
@@ -229,7 +239,8 @@ def api_presensi(papi: API = Depends(GetAuth)):
 
 @app.post("/api/absen", summary='Check open attendance and submit it',
           description='Scans all enrolled courses for currently open attendance sessions and '
-                      'submits attendance for any that are not yet recorded.',
+                      'submits attendance for any that are not yet recorded. '
+                      'Skips the check entirely outside course hours (Mon-Fri, 06:00-18:00 WIB).',
           responses=_ok('Attendance processing result', {
               'error': False,
               'data': {
@@ -238,6 +249,8 @@ def api_presensi(papi: API = Depends(GetAuth)):
               }
           }))
 def api_absen(papi: API = Depends(GetAuth)):
+    if not _is_course_hours():
+        return {'error': False, 'data': {'absen': [], 'details': 'no open attendance'}}
     data_absen = papi.absen()
     return {'error': False, 'data': data_absen}
 
