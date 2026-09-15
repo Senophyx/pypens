@@ -1,6 +1,7 @@
 import json
 import base64
 from concurrent import futures
+from datetime import datetime, timezone
 from .exceptions import APIError
 
 class EtholHandler:
@@ -233,6 +234,28 @@ class EtholHandler:
             self._log.debug('No attendance notification')
             return {'absen': [], 'details': 'no open attendance'}
 
+        # Old sessions keep their notifications forever; keep only the newest per matkul
+        # and only recent ones, so we check each open matkul once.
+        now = datetime.now(timezone.utc)
+        newest_notifs = {}
+        for notif in presensi_notifs:
+            terkait = notif.get('dataTerkait') or ''
+            created = notif.get('createdAt') or ''
+            if terkait not in newest_notifs or created > newest_notifs[terkait].get('createdAt', ''):
+                newest_notifs[terkait] = notif
+
+        def _age_hours(notif):
+            created = notif.get('createdAt') or ''
+            try:
+                return (now - datetime.fromisoformat(created.replace('Z', '+00:00'))).total_seconds() / 3600
+            except ValueError:
+                return 0
+
+        recent_notifs = [n for n in newest_notifs.values() if _age_hours(n) < 24]
+        if not recent_notifs:
+            self._log.debug('No recent attendance notification')
+            return {'absen': [], 'details': 'no open attendance'}
+
         def _cek_notif(notif):
             """Return (kuliah, jenis_schema, key, matkul_name) for an open session"""
             terkait = notif.get('dataTerkait') or ''
@@ -254,7 +277,7 @@ class EtholHandler:
             return None
 
         open_list = []
-        for notif in presensi_notifs:
+        for notif in recent_notifs:
             target = _cek_notif(notif)
             if target is None:
                 continue
@@ -318,5 +341,6 @@ class EtholHandler:
                 hasil.append({'matkul': matkul_name, 'submitted': False,
                               'details': f'server error during submission ({res_submit.status_code})'})
 
-        self._log.debug(f'Attendance processed for {len(hasil)} matkul')
-        return {'absen': hasil, 'details': f'{len(hasil)} matkul attended'}
+        submitted_count = sum(1 for h in hasil if h.get('submitted'))
+        self._log.debug(f'Attendance processed for {len(hasil)} matkul, {submitted_count} submitted')
+        return {'absen': hasil, 'details': f'{submitted_count} matkul attended'}
