@@ -127,7 +127,7 @@ def _umami_send(events):
 @app.middleware("http")
 async def analytics(request: Request, call_next):
     response = await call_next(request)
-    if not (_UMAMI_ENABLE and _UMAMI_URL and _UMAMI_WEB_ID) or not request.url.path.startswith('/api'):
+    if not (_UMAMI_ENABLE and _UMAMI_URL and _UMAMI_WEB_ID):
         return response
 
     fwd = request.headers.get('x-forwarded-for')
