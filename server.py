@@ -1,4 +1,5 @@
 import hashlib
+import os
 import threading
 from collections import defaultdict, deque
 from datetime import datetime
@@ -6,6 +7,7 @@ from time import time
 from zoneinfo import ZoneInfo
 
 from pypens import API, APIError
+import requests
 import uvicorn
 import logging
 from fastapi import FastAPI, Depends, Request
@@ -103,6 +105,58 @@ async def rate_limit(request: Request, call_next):
             return JSONResponse(status_code=429, content={'error': True, 'msg': 'Rate limit exceeded. Try again later.', 'data': None})
         window.append(now)
     return await call_next(request)
+
+# ==== ANALYTICS (umami self-hosted, server-side) ====
+# Off by default: needs UMAMI_ENABLE=true plus a URL and a website ID.
+_UMAMI_ENABLE = os.environ.get('UMAMI_ENABLE', 'false').lower() == 'true'
+_UMAMI_URL = os.environ.get('UMAMI_URL', '').rstrip('/')
+_UMAMI_WEB_ID = os.environ.get('UMAMI_WEB_ID', '')
+# Umami drops non-browser user agents (python-requests/curl/httpx count as bots),
+# so the header must look like a browser; the real client UA is kept in event data.
+_UMAMI_UA = ('Mozilla/5.0 (Linux; Android 11; SM-A528B Build/RP1A.200720.012; wv) '
+             'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/87.0.4280.141 Mobile Safari/537.36')
+
+def _umami_send(events):
+    """Fire-and-forget: analytics must never fail a user request"""
+    try:
+        requests.post(f'{_UMAMI_URL}/api/batch', json=events,
+                      headers={'User-Agent': _UMAMI_UA}, timeout=3)
+    except Exception as e:
+        log.warning(f'umami: {e}')
+
+@app.middleware("http")
+async def analytics(request: Request, call_next):
+    response = await call_next(request)
+    if not (_UMAMI_ENABLE and _UMAMI_URL and _UMAMI_WEB_ID) or not request.url.path.startswith('/api'):
+        return response
+
+    fwd = request.headers.get('x-forwarded-for')
+    ip = fwd.split(',')[0].strip() if fwd else (request.client.host if request.client else '')
+    user = getattr(request.state, 'user', 'guest')[:50]
+
+    # pageview: url -> Pages report, title -> method + endpoint, id -> unique visitors
+    base = {
+        'website': _UMAMI_WEB_ID,
+        'hostname': request.headers.get('host', '').split(':')[0],
+        'url': request.url.path,
+        'title': f'{request.method} {request.url.path}',
+        'id': user,
+        'ip': ip,
+        'userAgent': _UMAMI_UA,
+    }
+    events = [{'type': 'event', 'payload': base}]
+
+    # errors stay searchable in the Events report
+    if response.status_code >= 400:
+        events.append({'type': 'event', 'payload': {
+            **base, 'name': 'api-error',
+            'data': {'endpoint': request.url.path, 'method': request.method,
+                     'status': response.status_code,
+                     'client': request.headers.get('user-agent', '')[:100]},
+        }})
+
+    threading.Thread(target=_umami_send, args=(events,), daemon=True).start()
+    return response
 
 _sessions = {}
 _sessions_lock = threading.Lock()
