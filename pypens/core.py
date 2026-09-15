@@ -28,7 +28,8 @@ class API(AuthHandler, EtholHandler, MisHandler):
         self._users_dir = users_dir
         os.makedirs(self._users_dir, exist_ok=True)
         self._username = self._email.split('@')[0]
-        self._session_file = os.path.join(self._users_dir, f"{self._username}.json")
+        self._depart = self._email.partition('@')[2].split('.')[0]
+        self._session_file = os.path.join(self._users_dir, f"{self._username}.{self._depart}.json")
         self._user_hash = hashlib.sha256(f'{self._email}:{self._password}'.encode()).hexdigest()
 
         log_level = logging.DEBUG if debug else logging.INFO

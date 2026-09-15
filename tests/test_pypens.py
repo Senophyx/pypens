@@ -9,6 +9,7 @@ Run: python3 -m unittest discover -s tests -v
 """
 import json
 import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -166,6 +167,20 @@ class TestAPIError(unittest.TestCase):
         _dump('APIError', {'is_exception': issubclass(APIError, Exception), 'str': str(err)})
         self.assertTrue(issubclass(APIError, Exception))
         self.assertEqual(str(err), 'test message')
+
+class TestSessionFileName(unittest.TestCase):
+    def test_same_username_different_depart(self):
+        """cache file must separate accounts that share a username"""
+        with tempfile.TemporaryDirectory() as tmp:
+            it = API('test@it.student.pens.ac.id', 'x', users_dir=tmp)
+            me = API('test@me.student.pens.ac.id', 'x', users_dir=tmp)
+            _dump('session file', {
+                'it': os.path.basename(it._session_file),
+                'me': os.path.basename(me._session_file),
+            })
+            self.assertEqual(os.path.basename(it._session_file), 'test.it.json')
+            self.assertNotEqual(it._session_file, me._session_file)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
