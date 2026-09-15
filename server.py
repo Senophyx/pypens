@@ -109,7 +109,9 @@ async def rate_limit(request: Request, call_next):
 # ==== ANALYTICS (umami self-hosted, server-side) ====
 # Off by default: needs UMAMI_ENABLE=true plus a URL and a website ID.
 _UMAMI_ENABLE = os.environ.get('UMAMI_ENABLE', 'false').lower() == 'true'
-_UMAMI_URL = os.environ.get('UMAMI_URL', '').rstrip('/')
+_UMAMI_URL = os.environ.get('UMAMI_URL', '').strip().rstrip('/')
+if _UMAMI_URL and '://' not in _UMAMI_URL:
+    _UMAMI_URL = f'https://{_UMAMI_URL}'
 _UMAMI_WEB_ID = os.environ.get('UMAMI_WEB_ID', '')
 # Umami drops non-browser user agents (python-requests/curl/httpx count as bots),
 # so the header must look like a browser; the real client UA is kept in event data.
