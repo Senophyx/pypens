@@ -19,10 +19,10 @@ services:
 
     environment:
       - TZ=Asia/Jakarta
-      # Set UMAMI_ENABLE=false to turn request analytics off entirely.
-      - UMAMI_ENABLE=false
-      - UMAMI_URL=
-      - UMAMI_WEB_ID=
+      # Umami analytics, off unless overridden in .env (see DOCS.md).
+      - UMAMI_ENABLE=${UMAMI_ENABLE:-false}
+      - UMAMI_URL=${UMAMI_URL:-}
+      - UMAMI_WEB_ID=${UMAMI_WEB_ID:-}
     volumes:
       - ./server.py:/app/server.py
       - ./pypens:/app/pypens
